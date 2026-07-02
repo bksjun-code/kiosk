@@ -699,4 +699,5 @@ if __name__ == "__main__":
     # 외부에 여는 배포 환경에서는 절대 켜면 안 된다 (기본값 꺼짐, 로컬 개발 시에만 FLASK_DEBUG=1로 명시적으로 켠다).
     debug = os.environ.get("FLASK_DEBUG", "0") == "1"
     host = os.environ.get("FLASK_RUN_HOST", "0.0.0.0")
-    app.run(debug=debug, host=host, port=5000)
+    port = int(os.environ.get("FLASK_RUN_PORT", 6000))
+    app.run(debug=debug, host=host, port=port)

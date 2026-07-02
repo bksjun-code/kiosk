@@ -33,9 +33,10 @@ pip install -r requirements.txt
 python app.py
 ```
 
-- 키오스크(고객용): http://localhost:5000
-- 주문 관리(직원용): http://localhost:5000/admin
-- 매출 상세(직원용): http://localhost:5000/admin/sales
+- 키오스크(고객용): http://localhost:6000
+- 주문 관리(직원용): http://localhost:6000/admin
+- 매출 상세(직원용): http://localhost:6000/admin/sales
+- 적립금 현황(직원용): http://localhost:6000/admin/members
 
 최초 실행 시 `backend/kiosk.db`가 자동 생성되고 메뉴 데이터가 시드됩니다.
 
