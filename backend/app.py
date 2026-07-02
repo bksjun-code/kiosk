@@ -1,4 +1,5 @@
 import json
+import os
 import random
 import re
 from pathlib import Path
@@ -693,4 +694,9 @@ def admin_update_status(order_id):
 
 
 if __name__ == "__main__":
-    app.run(debug=True, port=5000)
+    # host="0.0.0.0"으로 열어야 같은 컴퓨터가 아닌 외부(가상머신 바깥)에서도 접속할 수 있다.
+    # 단, Flask 디버그 모드는 원격 코드 실행으로 이어질 수 있는 대화형 디버거를 노출하므로
+    # 외부에 여는 배포 환경에서는 절대 켜면 안 된다 (기본값 꺼짐, 로컬 개발 시에만 FLASK_DEBUG=1로 명시적으로 켠다).
+    debug = os.environ.get("FLASK_DEBUG", "0") == "1"
+    host = os.environ.get("FLASK_RUN_HOST", "0.0.0.0")
+    app.run(debug=debug, host=host, port=5000)
