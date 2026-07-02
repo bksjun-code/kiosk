@@ -8,13 +8,14 @@
 """
 import json
 import math
+import os
 import random
 import sqlite3
 import time
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
-DB_PATH = Path(__file__).resolve().parent / "kiosk.db"
+DB_PATH = Path(os.environ.get("KIOSK_DB_PATH", Path(__file__).resolve().parent / "kiosk.db"))
 
 START_DATE = date(2014, 1, 1)
 END_DATE = date.today()

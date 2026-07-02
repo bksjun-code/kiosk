@@ -19,6 +19,10 @@ ORDER_STATUSES = ("pending", "preparing", "completed", "cancelled")
 
 app = Flask(__name__, static_folder=None)
 
+# gunicorn 등 WSGI 서버가 app.py를 import만 하고 __main__ 블록을 안 타는 경우에도
+# DB 스키마가 준비되도록 모듈 로드 시점에 실행한다 (이미 DB 파일이 있으면 아무 것도 안 함).
+init_db()
+
 
 def row_to_dict(row):
     return dict(row)
@@ -689,5 +693,4 @@ def admin_update_status(order_id):
 
 
 if __name__ == "__main__":
-    init_db()
     app.run(debug=True, port=5000)
