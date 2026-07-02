@@ -699,5 +699,7 @@ if __name__ == "__main__":
     # 외부에 여는 배포 환경에서는 절대 켜면 안 된다 (기본값 꺼짐, 로컬 개발 시에만 FLASK_DEBUG=1로 명시적으로 켠다).
     debug = os.environ.get("FLASK_DEBUG", "0") == "1"
     host = os.environ.get("FLASK_RUN_HOST", "0.0.0.0")
-    port = int(os.environ.get("FLASK_RUN_PORT", 6000))
+    # 6000번은 브라우저(Chrome/Firefox)가 X11 프로토콜용으로 예약해 접속을 차단하는
+    # "unsafe port" 목록에 있어 ERR_UNSAFE_PORT가 난다. 목록에 없는 8000번을 기본값으로 쓴다.
+    port = int(os.environ.get("FLASK_RUN_PORT", 8000))
     app.run(debug=debug, host=host, port=port)
