@@ -700,6 +700,6 @@ if __name__ == "__main__":
     debug = os.environ.get("FLASK_DEBUG", "0") == "1"
     host = os.environ.get("FLASK_RUN_HOST", "0.0.0.0")
     # 6000번은 브라우저(Chrome/Firefox)가 X11 프로토콜용으로 예약해 접속을 차단하는
-    # "unsafe port" 목록에 있어 ERR_UNSAFE_PORT가 난다. 목록에 없는 8000번을 기본값으로 쓴다.
-    port = int(os.environ.get("FLASK_RUN_PORT", 8000))
+    # "unsafe port" 목록에 있고, 8000번은 배포 환경에서 다른 프로세스와 충돌해 5500번을 쓴다.
+    port = int(os.environ.get("FLASK_RUN_PORT", 5500))
     app.run(debug=debug, host=host, port=port)
