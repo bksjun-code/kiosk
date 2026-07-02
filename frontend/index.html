@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>빽다방 키오스크</title>
+<link rel="stylesheet" href="/static/css/fig-tokens.css">
+<link rel="stylesheet" href="/static/css/typography.css">
+<link rel="stylesheet" href="/static/css/spacing.css">
+<link rel="stylesheet" href="/static/css/materials.css">
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<!-- iOS/iPadOS 26 Design System component kit (Button, NavigationBar, Sheet, SegmentedControl, ...) -->
+<script src="/static/js/ds-bundle.js"></script>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body {
+    background: #111;
+    display: flex; align-items: center; justify-content: center;
+    min-height: 100vh;
+    font-family: var(--font-system, -apple-system, BlinkMacSystemFont, "SF Pro", "Helvetica Neue", sans-serif);
+    overflow: hidden;
+  }
+  #kiosk-stage { width: 100vw; height: 100vh; display: flex; align-items: center; justify-content: center; }
+  #kiosk-frame {
+    width: 540px; height: 960px;
+    background: var(--surface-grouped, #F0F2F5);
+    border-radius: 24px; overflow: hidden;
+    position: relative;
+    box-shadow: 0 48px 120px rgba(0,0,0,0.7), 0 0 0 1px rgba(255,255,255,0.08);
+    transform-origin: center center;
+  }
+  #app-root { width: 100%; height: 100%; }
+  ::-webkit-scrollbar { width: 3px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.15); border-radius: 2px; }
+</style>
+</head>
+<body>
+<div id="kiosk-stage"><div id="kiosk-frame"><div id="app-root"></div></div></div>
+
+<script type="text/babel" src="/static/js/app.js"></script>
+</body>
+</html>
