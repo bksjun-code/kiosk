@@ -525,6 +525,343 @@ function formatPhoneDigits(digits) {
   return `${digits.slice(0,3)}-${digits.slice(3,7)}-${digits.slice(7,11)}`;
 }
 
+/* ─── PAYMENT GATEWAY SIMULATION ───
+   실제 PG사 연동 없이 각 결제수단(간편결제 리다이렉트/승인대기, 카드사 선택 후
+   카드 입력, Apple Pay 시트)을 화면상에서 재현한다. 시뮬레이션이 성공으로
+   끝나야만 실제 주문 생성 API(onPay)를 호출한다. */
+function luhnCheck(num) {
+  let sum = 0, alt = false;
+  for (let i = num.length - 1; i >= 0; i--) {
+    let n = parseInt(num[i], 10);
+    if (alt) { n *= 2; if (n > 9) n -= 9; }
+    sum += n; alt = !alt;
+  }
+  return sum % 10 === 0;
+}
+function fmtCardNumber(digits) { return digits.replace(/(\d{4})(?=\d)/g, '$1 '); }
+function fmtCardExpiry(digits) { return digits.length <= 2 ? digits : digits.slice(0, 2) + '/' + digits.slice(2, 4); }
+function fmtMMSS(sec) {
+  const m = Math.floor(sec / 60).toString().padStart(2, '0');
+  const s = (sec % 60).toString().padStart(2, '0');
+  return `${m}:${s}`;
+}
+/* 실제 QR 코드처럼 보이도록 세 모서리 파인더 패턴 + 타이밍 패턴 + 정렬 패턴을
+   그리고, 나머지 모듈만 시드 기반 의사난수로 채운다(스캔 가능한 진짜 QR은 아님). */
+const QR_SIZE = 21;
+function qrMatrix(seed) {
+  let x = seed;
+  const rand = () => { x = (x * 9301 + 49297) % 233280; return x / 233280; };
+  const grid = Array.from({ length: QR_SIZE }, () => Array(QR_SIZE).fill(false));
+
+  const drawFinder = (r0, c0) => {
+    for (let r = 0; r < 7; r++) {
+      for (let c = 0; c < 7; c++) {
+        const border = r === 0 || r === 6 || c === 0 || c === 6;
+        const core = r >= 2 && r <= 4 && c >= 2 && c <= 4;
+        grid[r0 + r][c0 + c] = border || core;
+      }
+    }
+  };
+  drawFinder(0, 0);
+  drawFinder(0, QR_SIZE - 7);
+  drawFinder(QR_SIZE - 7, 0);
+
+  for (let i = 8; i < QR_SIZE - 8; i++) {
+    grid[6][i] = i % 2 === 0;
+    grid[i][6] = i % 2 === 0;
+  }
+
+  const ar = QR_SIZE - 9, ac = QR_SIZE - 9;
+  for (let r = 0; r < 5; r++) {
+    for (let c = 0; c < 5; c++) {
+      const border = r === 0 || r === 4 || c === 0 || c === 4;
+      const core = r === 2 && c === 2;
+      grid[ar + r][ac + c] = border || core;
+    }
+  }
+
+  for (let r = 0; r < QR_SIZE; r++) {
+    for (let c = 0; c < QR_SIZE; c++) {
+      const inFinder = (r < 8 && c < 8) || (r < 8 && c >= QR_SIZE - 8) || (r >= QR_SIZE - 8 && c < 8);
+      const inAlign = r >= ar - 1 && r <= ar + 5 && c >= ac - 1 && c <= ac + 5;
+      const inTiming = r === 6 || c === 6;
+      if (inFinder || inAlign || inTiming) continue;
+      grid[r][c] = rand() > 0.55;
+    }
+  }
+  return grid.flat();
+}
+const TEST_CARDS = [
+  { label: '정상 승인', number: '4242424242424242', expiry: '12/29', cvc: '123' },
+  { label: '카드 거절', number: '4000000000000002', expiry: '12/29', cvc: '123' },
+];
+/* 키오스크 고객 화면에는 간편결제/카드만 노출한다. '현금결제'는 계산대 직원이
+   별도로 처리하는 방식이라 여기서는 숨기지만, 과거 주문이 참조하므로 DB에서는
+   지우지 않는다(관리자 화면의 매출 통계·주문 상세는 영향받지 않음). */
+const KIOSK_PAY_METHOD_ORDER = ['kakao', 'naver', 'samsung', 'apple', 'payco', 'card'];
+function kioskPayMethods(payMethods) {
+  return KIOSK_PAY_METHOD_ORDER
+    .map(id => payMethods.find(pm => pm.id === id))
+    .filter(Boolean);
+}
+const PAY_METHOD_DESC = {
+  kakao: '카카오톡으로 간편하게 결제',
+  naver: '네이버 아이디로 간편하게 결제',
+  samsung: '지문 인증으로 간편하게 결제',
+  apple: 'Face ID로 즉시 결제',
+  payco: '페이코 포인트로 간편하게 결제',
+  card: '카드 정보를 직접 입력',
+  cash: '카운터에서 현금으로 결제',
+};
+const CARD_ISSUERS = [
+  { id: 'shinhan', label: '신한카드', color: '#0046FF' },
+  { id: 'samsung', label: '삼성카드', color: '#1428A0' },
+  { id: 'kb', label: 'KB국민카드', color: '#FFB300' },
+  { id: 'hyundai', label: '현대카드', color: '#000000' },
+  { id: 'lotte', label: '롯데카드', color: '#ED1C24' },
+  { id: 'hana', label: '하나카드', color: '#008485' },
+  { id: 'nh', label: 'NH농협카드', color: '#00A651' },
+  { id: 'woori', label: '우리카드', color: '#0067AC' },
+  { id: 'bc', label: 'BC카드', color: '#EA002C' },
+];
+
+/* 결제수단별 게이트웨이 시뮬레이션 오버레이. 승인되면 onApprove(), 취소/거절되면
+   onCancel(reason)을 호출해 부모(PaymentScreen)가 실제 결제 진행 여부를 결정한다. */
+function PaymentGatewaySheet({ method, methodMeta, amount, onApprove, onCancel }) {
+  const [stage, setStage] = useState(method.id === 'card' ? 'card_issuer' : method.id === 'apple' ? 'apple_sheet' : 'redirect');
+  const [countdown, setCountdown] = useState(60);
+  const [issuer, setIssuer] = useState(null);
+  const [cardNumber, setCardNumber] = useState('');
+  const [cardName, setCardName] = useState('');
+  const [cardExpiry, setCardExpiry] = useState('');
+  const [cardCvc, setCardCvc] = useState('');
+  const [cardTouched, setCardTouched] = useState({});
+  const [cardErrors, setCardErrors] = useState({});
+  const issuerMeta = CARD_ISSUERS.find(i => i.id === issuer);
+
+  const timers = useRef([]);
+  const pushTimer = (t) => timers.current.push(t);
+  useEffect(() => () => timers.current.forEach(clearTimeout), []);
+
+  useEffect(() => {
+    if (stage !== 'redirect') return;
+    pushTimer(setTimeout(() => { setCountdown(60); setStage('wait'); }, 900));
+  }, [stage]);
+
+  useEffect(() => {
+    if (stage !== 'wait') return;
+    if (countdown <= 0) { onCancel('인증 시간이 초과되었습니다. 다시 시도해주세요.'); return; }
+    const t = setTimeout(() => setCountdown(c => c - 1), 1000);
+    return () => clearTimeout(t);
+  }, [stage, countdown]);
+
+  const rawCardNumber = cardNumber.replace(/\s/g, '');
+  function validateCard() {
+    const e = {};
+    if (rawCardNumber.length < 13 || rawCardNumber.length > 16 || !luhnCheck(rawCardNumber)) e.number = '카드 번호가 올바르지 않습니다.';
+    if (!cardName.trim()) e.name = '카드에 표시된 이름을 입력해주세요.';
+    const [mm, yy] = cardExpiry.split('/');
+    if (!mm || !yy || mm.length !== 2 || yy.length !== 2) e.expiry = 'MM/YY 형식으로 입력해주세요.';
+    if (cardCvc.length !== 3) e.cvc = 'CVC는 3자리입니다.';
+    setCardErrors(e);
+    return Object.keys(e).length === 0;
+  }
+  function fillTestCard(tc) {
+    setCardNumber(fmtCardNumber(tc.number));
+    setCardName('HONG GILDONG');
+    setCardExpiry(tc.expiry);
+    setCardCvc(tc.cvc);
+    setCardErrors({}); setCardTouched({});
+  }
+  function submitCard() {
+    setCardTouched({ number: true, name: true, expiry: true, cvc: true });
+    if (!validateCard()) return;
+    setStage('card_processing');
+    pushTimer(setTimeout(() => {
+      if (rawCardNumber === '4000000000000002') onCancel('카드가 거절되었습니다. 카드사에 문의해주세요.');
+      else onApprove();
+    }, 1400));
+  }
+
+  return (
+    <DS.Sheet detent={stage === 'card_form' || stage === 'card_issuer' ? 'large' : 'medium'}>
+      <div style={{ display:'flex', flexDirection:'column', height:'100%' }}>
+        <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'8px 16px 4px' }}>
+          <div style={{ display:'flex', alignItems:'center', gap:10 }}>
+            {stage === 'card_form' && (
+              <DS.IconButton icon="chevron.left" variant="plain" size="small" onClick={() => setStage('card_issuer')} aria-label="뒤로"/>
+            )}
+            <div style={{ width:32, height:32, borderRadius:9, background: methodMeta.color, display:'flex', alignItems:'center', justifyContent:'center', fontSize:16 }}>{methodMeta.icon}</div>
+            <span className="ios-footnote" style={{ fontWeight:800, color:'var(--labels-primary)' }}>{methodMeta.label}</span>
+          </div>
+          {stage !== 'card_processing' && (
+            <DS.IconButton icon="xmark" variant="plain" size="small" onClick={() => onCancel(null)} aria-label="취소"/>
+          )}
+        </div>
+
+        <div style={{ flex:1, overflowY:'auto', padding:'8px 24px 24px', display:'flex', flexDirection:'column' }}>
+          {stage === 'redirect' && (
+            <div style={{ flex:1, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap:14, textAlign:'center' }}>
+              <DS.ActivityIndicator size={30} color="var(--accents-blue)"/>
+              <div className="ios-headline" style={{ color:'var(--labels-primary)' }}>{methodMeta.label} 결제창으로 이동 중</div>
+              <div className="ios-caption2" style={{ color:'var(--labels-tertiary)', maxWidth:260 }}>실제 서비스에서는 이 시점에 {methodMeta.label} 앱/도메인으로 이동합니다.</div>
+            </div>
+          )}
+
+          {stage === 'wait' && (
+            <div style={{ flex:1, display:'flex', flexDirection:'column', alignItems:'center', gap:16, textAlign:'center', paddingTop:8 }}>
+              <div style={{ display:'grid', gridTemplateColumns:`repeat(${QR_SIZE}, 1fr)`, width:132, height:132, background:'#fff', border:'1px solid var(--separators-non-opaque)', borderRadius:10, padding:10 }}>
+                {qrMatrix(42).map((on, i) => <div key={i} style={{ background: on ? '#000' : 'transparent' }}/>)}
+              </div>
+              <div>
+                <div className="ios-headline" style={{ color:'var(--labels-primary)' }}>{methodMeta.label} 앱에서 결제를 승인해주세요</div>
+                <div className="ios-caption2" style={{ color:'var(--labels-tertiary)', marginTop:4 }}>모바일 알림 또는 QR 스캔으로 인증합니다</div>
+              </div>
+              <div style={{ display:'flex', alignItems:'center', gap:6, color: countdown < 15 ? 'var(--accents-red)' : 'var(--labels-secondary)', fontSize:13, fontWeight:600 }}>
+                <DS.Icon name="clock" size={14}/>
+                <span>{fmtMMSS(countdown)} 이내 인증 필요</span>
+              </div>
+              <div style={{ width:'100%', marginTop:8, paddingTop:16, borderTop:'0.5px solid var(--separators-non-opaque)' }}>
+                <div style={{ display:'flex', gap:8 }}>
+                  <DS.Button variant="filled" tint="var(--accents-green)" block onClick={onApprove}>승인</DS.Button>
+                  <DS.Button variant="bordered" block onClick={() => onCancel('사용자가 결제를 거절했습니다.')}>거절</DS.Button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {stage === 'apple_sheet' && (
+            <div style={{ flex:1, display:'flex', flexDirection:'column' }}>
+              <div style={{ background:'#000', borderRadius:14, padding:'16px 18px', marginBottom:16 }}>
+                <div style={{ color:'#fff', fontSize:13, fontWeight:700, marginBottom:10 }}>Apple Pay</div>
+                <div style={{ display:'flex', justifyContent:'space-between', fontSize:12.5, color:'#D1D1D6', marginBottom:4 }}>
+                  <span>주문 금액</span><span>₩{amount.toLocaleString()}</span>
+                </div>
+                <div style={{ borderTop:'1px solid #333', marginTop:8, paddingTop:8, display:'flex', justifyContent:'space-between', fontSize:13, color:'#fff', fontWeight:700 }}>
+                  <span>합계</span><span>₩{amount.toLocaleString()}</span>
+                </div>
+              </div>
+              <div style={{ flex:1, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap:12, padding:'12px 0' }}>
+                <div style={{ fontSize:38 }}>🆔</div>
+                <div className="ios-headline" style={{ color:'var(--labels-primary)' }}>Face ID로 결제를 확인하세요</div>
+                <div className="ios-caption2" style={{ color:'var(--labels-tertiary)' }}>도메인 이동 없이 이 화면에서 바로 인증됩니다</div>
+                <div style={{ width:'100%', marginTop:8, paddingTop:16, borderTop:'0.5px dashed var(--separators-non-opaque)' }}>
+                  <div style={{ display:'flex', gap:8 }}>
+                    <DS.Button variant="filled" tint="var(--accents-green)" block onClick={onApprove}>Face ID 인증 성공</DS.Button>
+                    <DS.Button variant="bordered" block onClick={() => onCancel('Face ID 인증이 취소되었습니다.')}>인증 취소</DS.Button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {stage === 'card_issuer' && (
+            <div>
+              <div className="ios-headline" style={{ color:'var(--labels-primary)', marginBottom:4 }}>카드사 선택</div>
+              <div className="ios-caption2" style={{ color:'var(--labels-tertiary)', marginBottom:18 }}>결제하실 카드의 발급사를 선택해주세요</div>
+
+              <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:10 }}>
+                {CARD_ISSUERS.map(iss => (
+                  <button key={iss.id} onClick={() => { setIssuer(iss.id); setStage('card_form'); }} style={{
+                    display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap:8,
+                    padding:'16px 8px', borderRadius:12, border:`1.5px solid ${issuer === iss.id ? 'var(--accents-blue)' : 'var(--separators-non-opaque)'}`,
+                    background:'var(--backgrounds-primary)', cursor:'pointer',
+                  }}>
+                    <div style={{ width:32, height:32, borderRadius:8, background: iss.color }}/>
+                    <span style={{ fontSize:12, fontWeight:700, color:'var(--labels-primary)' }}>{iss.label}</span>
+                  </button>
+                ))}
+              </div>
+
+              <div className="ios-caption2" style={{ color:'var(--labels-tertiary)', margin:'18px 0 10px', textAlign:'center' }}>
+                카드사를 모르시면 다음 화면에서 카드번호만 입력하셔도 됩니다
+              </div>
+              <DS.Button variant="gray" size="large" block onClick={() => { setIssuer(null); setStage('card_form'); }}>카드사 선택 건너뛰기</DS.Button>
+            </div>
+          )}
+
+          {stage === 'card_form' && (
+            <div>
+              <div className="ios-caption2" style={{ color:'var(--labels-tertiary)', marginBottom:16 }}>
+                {issuerMeta ? (
+                  <span style={{ display:'inline-flex', alignItems:'center', gap:6 }}>
+                    <span style={{ width:14, height:14, borderRadius:4, background: issuerMeta.color, display:'inline-block' }}/>
+                    {issuerMeta.label} · ₩{amount.toLocaleString()}
+                  </span>
+                ) : `카드 정보를 입력해주세요 · ₩${amount.toLocaleString()}`}
+              </div>
+
+              <div style={{ marginBottom:18, padding:12, borderRadius:12, background:'var(--fills-tertiary)' }}>
+                <div className="ios-caption2" style={{ color:'var(--labels-secondary)', fontWeight:700, marginBottom:8 }}>테스트 카드로 빠르게 입력하기</div>
+                <div style={{ display:'flex', gap:8 }}>
+                  {TEST_CARDS.map(tc => (
+                    <button key={tc.label} onClick={() => fillTestCard(tc)} style={{ flex:1, fontSize:13, fontWeight:700, padding:'10px 10px', borderRadius:9, border:'1.5px solid var(--separators-non-opaque)', background:'var(--backgrounds-primary)', color:'var(--labels-primary)', cursor:'pointer' }}>
+                      {tc.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div style={{ marginBottom:12 }}>
+                <div className="ios-caption2" style={{ color:'var(--labels-secondary)', fontWeight:700, marginBottom:6 }}>카드 번호</div>
+                <DS.TextField
+                  value={cardNumber} placeholder="4242 4242 4242 4242" inputMode="numeric"
+                  onChange={(v) => setCardNumber(fmtCardNumber(v.replace(/\D/g, '').slice(0, 16)))}
+                  onBlur={() => setCardTouched(t => ({ ...t, number: true }))}
+                  style={cardTouched.number && cardErrors.number ? { boxShadow:'inset 0 0 0 1.5px var(--accents-red)' } : undefined}
+                />
+                {cardTouched.number && cardErrors.number && <div className="ios-caption2" style={{ color:'var(--accents-red)', marginTop:4 }}>{cardErrors.number}</div>}
+              </div>
+
+              <div style={{ marginBottom:12 }}>
+                <div className="ios-caption2" style={{ color:'var(--labels-secondary)', fontWeight:700, marginBottom:6 }}>카드 소유자 이름</div>
+                <DS.TextField
+                  value={cardName} placeholder="HONG GILDONG"
+                  onChange={setCardName} onBlur={() => setCardTouched(t => ({ ...t, name: true }))}
+                  style={cardTouched.name && cardErrors.name ? { boxShadow:'inset 0 0 0 1.5px var(--accents-red)' } : undefined}
+                />
+                {cardTouched.name && cardErrors.name && <div className="ios-caption2" style={{ color:'var(--accents-red)', marginTop:4 }}>{cardErrors.name}</div>}
+              </div>
+
+              <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10, marginBottom:16 }}>
+                <div>
+                  <div className="ios-caption2" style={{ color:'var(--labels-secondary)', fontWeight:700, marginBottom:6 }}>유효기간</div>
+                  <DS.TextField
+                    value={cardExpiry} placeholder="MM/YY" inputMode="numeric"
+                    onChange={(v) => setCardExpiry(fmtCardExpiry(v.replace(/\D/g, '').slice(0, 4)))}
+                    onBlur={() => setCardTouched(t => ({ ...t, expiry: true }))}
+                    style={cardTouched.expiry && cardErrors.expiry ? { boxShadow:'inset 0 0 0 1.5px var(--accents-red)' } : undefined}
+                  />
+                  {cardTouched.expiry && cardErrors.expiry && <div className="ios-caption2" style={{ color:'var(--accents-red)', marginTop:4 }}>{cardErrors.expiry}</div>}
+                </div>
+                <div>
+                  <div className="ios-caption2" style={{ color:'var(--labels-secondary)', fontWeight:700, marginBottom:6 }}>CVC</div>
+                  <DS.TextField
+                    value={cardCvc} placeholder="123" inputMode="numeric"
+                    onChange={(v) => setCardCvc(v.replace(/\D/g, '').slice(0, 3))}
+                    onBlur={() => setCardTouched(t => ({ ...t, cvc: true }))}
+                    style={cardTouched.cvc && cardErrors.cvc ? { boxShadow:'inset 0 0 0 1.5px var(--accents-red)' } : undefined}
+                  />
+                  {cardTouched.cvc && cardErrors.cvc && <div className="ios-caption2" style={{ color:'var(--accents-red)', marginTop:4 }}>{cardErrors.cvc}</div>}
+                </div>
+              </div>
+
+              <DS.Button variant="filled" size="large" block icon="lock" onClick={submitCard}>₩{amount.toLocaleString()} 결제하기</DS.Button>
+            </div>
+          )}
+
+          {stage === 'card_processing' && (
+            <div style={{ flex:1, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap:14 }}>
+              <DS.ActivityIndicator size={30} color="var(--accents-blue)"/>
+              <div className="ios-headline" style={{ color:'var(--labels-primary)' }}>카드 승인 요청 중...</div>
+            </div>
+          )}
+        </div>
+      </div>
+    </DS.Sheet>
+  );
+}
+
 /* 키오스크 터치 환경에서는 OS 키보드 대신 화면 안에 숫자 패드를 그려서 입력받는다. */
 function PhoneKeypad({ digits, onChange, maxLength = 11 }) {
   const press = d => { if (digits.length < maxLength) onChange(digits + d); };
@@ -554,6 +891,8 @@ function PaymentScreen({ total, payMethods, processing, error, onBack, onPay }) 
   const [balance, setBalance] = useState(null);
   const [looking, setLooking] = useState(false);
   const [lookupError, setLookupError] = useState(null);
+  const [gatewayOpen, setGatewayOpen] = useState(false);
+  const [gatewayError, setGatewayError] = useState(null);
 
   const phoneValid = PHONE_PATTERN.test(phoneDigits);
   const pointsToUse = pointsMode === 'use' && balance != null ? Math.min(balance, total) : 0;
@@ -561,6 +900,16 @@ function PaymentScreen({ total, payMethods, processing, error, onBack, onPay }) 
   const canPay = sel
     && (pointsMode !== 'earn' || phoneValid)
     && (pointsMode !== 'use' || (phoneValid && balance != null));
+  const activeMethodMeta = payMethods.find(p => p.id === sel);
+
+  const handleGatewayApprove = () => {
+    setGatewayOpen(false);
+    onPay(sel, pointsMode === 'none' ? null : formatPhoneDigits(phoneDigits), pointsMode === 'use');
+  };
+  const handleGatewayCancel = (reason) => {
+    setGatewayOpen(false);
+    setGatewayError(reason);
+  };
 
   const selectMode = (mode) => {
     setPointsMode(m => m === mode ? 'none' : mode);
@@ -584,7 +933,7 @@ function PaymentScreen({ total, payMethods, processing, error, onBack, onPay }) 
   };
 
   return (
-    <div style={{ width:'100%', height:'100%', display:'flex', flexDirection:'column', background:'var(--backgrounds-grouped-primary)' }}>
+    <div style={{ width:'100%', height:'100%', position:'relative', display:'flex', flexDirection:'column', background:'var(--backgrounds-grouped-primary)' }}>
       <div className="dark" style={{ background:'var(--backgrounds-primary)', flexShrink:0 }}>
         <DS.NavigationBar
           back="뒤로" onBack={onBack} translucent={false}
@@ -611,20 +960,27 @@ function PaymentScreen({ total, payMethods, processing, error, onBack, onPay }) 
           </DS.Card>
         </div>
 
-        <div className="ios-footnote" style={{ color:'var(--labels-primary)', fontWeight:700, marginBottom:12 }}>결제 방식을 선택해 주세요</div>
-        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
+        <div>
+          <div className="ios-footnote" style={{ color:'var(--labels-primary)', fontWeight:700 }}>결제 방식을 선택해 주세요</div>
+          <div className="ios-caption2" style={{ color:'var(--labels-tertiary)', marginTop:2, marginBottom:14 }}>시뮬레이션 화면이며 실제 결제는 발생하지 않습니다.</div>
+        </div>
+        <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
           {payMethods.map(pm => {
             const on = sel===pm.id;
             return (
-              <button key={pm.id} onClick={() => setSel(pm.id)} style={{
-                background: on ? 'var(--accents-blue)' : 'var(--backgrounds-grouped-secondary)',
+              <button key={pm.id} onClick={() => { setSel(pm.id); setGatewayError(null); }} style={{
+                display:'flex', alignItems:'center', gap:14, textAlign:'left',
+                background:'var(--backgrounds-primary)',
                 border: `2px solid ${on ? 'var(--accents-blue)' : 'var(--separators-non-opaque)'}`,
-                borderRadius:'var(--radius-lg)', padding:'20px 14px', cursor:'pointer', textAlign:'center',
-                boxShadow: on ? '0 6px 20px rgba(26,108,245,0.3)' : 'var(--shadow-card)',
+                borderRadius:'var(--radius-lg)', padding:'16px 18px', cursor:'pointer',
+                boxShadow: on ? '0 6px 20px rgba(26,108,245,0.18)' : 'var(--shadow-card)',
                 transition:'all 0.18s',
               }}>
-                <div style={{ fontSize:34, marginBottom:8 }}>{pm.icon}</div>
-                <div style={{ fontSize:12, fontWeight:700, color: on ? '#fff' : 'var(--labels-primary)' }}>{pm.label}</div>
+                <div style={{ width:42, height:42, borderRadius:10, background: pm.color, display:'flex', alignItems:'center', justifyContent:'center', fontSize:19, flexShrink:0 }}>{pm.icon}</div>
+                <div>
+                  <div style={{ fontSize:14.5, fontWeight:700, color:'var(--labels-primary)' }}>{pm.label}</div>
+                  <div className="ios-caption2" style={{ color:'var(--labels-tertiary)', marginTop:2 }}>{PAY_METHOD_DESC[pm.id] || ''}</div>
+                </div>
               </button>
             );
           })}
@@ -682,7 +1038,7 @@ function PaymentScreen({ total, payMethods, processing, error, onBack, onPay }) 
           )}
         </DS.Card>
 
-        {error && <div className="ios-footnote" style={{ marginTop:14, color:'var(--accents-red)', textAlign:'center' }}>{error}</div>}
+        {(gatewayError || error) && <div className="ios-footnote" style={{ marginTop:14, color:'var(--accents-red)', textAlign:'center' }}>{gatewayError || error}</div>}
       </div>
 
       <DS.Toolbar translucent={false} style={{ height:'auto', padding:'12px 16px', background:'var(--backgrounds-primary)' }}>
@@ -700,13 +1056,23 @@ function PaymentScreen({ total, payMethods, processing, error, onBack, onPay }) 
         ) : (
           <DS.Button
             variant="filled" size="large" block disabled={!canPay}
-            onClick={() => canPay && onPay(sel, pointsMode === 'none' ? null : formatPhoneDigits(phoneDigits), pointsMode === 'use')}
+            onClick={() => { if (canPay) { setGatewayError(null); setGatewayOpen(true); } }}
             style={{ width:'100%' }}
           >
             {sel ? `${payMethods.find(p=>p.id===sel)?.label}로 ₩${payableTotal.toLocaleString()} 결제하기` : '결제 수단을 선택해 주세요'}
           </DS.Button>
         )}
       </DS.Toolbar>
+
+      {gatewayOpen && activeMethodMeta && (
+        <PaymentGatewaySheet
+          method={activeMethodMeta}
+          methodMeta={activeMethodMeta}
+          amount={payableTotal}
+          onApprove={handleGatewayApprove}
+          onCancel={handleGatewayCancel}
+        />
+      )}
     </div>
   );
 }
@@ -810,7 +1176,7 @@ function App() {
       {screen==='welcome' && <WelcomeScreen onSelect={t => { setOrderType(t); setScreen('menu'); }}/>}
       {screen==='menu' && <MenuScreen catalog={catalog} orderType={orderType} cart={cart} onAdd={addToCart} onViewCart={() => setScreen('cart')} onBack={() => setScreen('welcome')}/>}
       {screen==='cart' && <CartScreen cart={cart} extraOptions={catalog.extras} orderType={orderType} onBack={() => setScreen('menu')} onPayment={() => setScreen('payment')} onQty={updateQty} onRemove={remove}/>}
-      {screen==='payment' && <PaymentScreen total={payTotal} payMethods={catalog.payMethods} processing={paying} error={payError} onBack={() => setScreen('cart')} onPay={handlePay}/>}
+      {screen==='payment' && <PaymentScreen total={payTotal} payMethods={kioskPayMethods(catalog.payMethods)} processing={paying} error={payError} onBack={() => setScreen('cart')} onPay={handlePay}/>}
       {screen==='complete' && <CompleteScreen orderType={orderType} orderNumber={completedOrder?.orderNumber} pointsEarned={completedOrder?.pointsEarned} pointsUsed={completedOrder?.pointsUsed} onReset={reset}/>}
     </div>
   );

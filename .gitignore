@@ -3,3 +3,5 @@ __pycache__/
 backend/kiosk.db
 backend/seed_history.log
 .DS_Store
+.playwright-mcp/
+/*.png

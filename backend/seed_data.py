@@ -114,12 +114,15 @@ EXTRAS = [
 ]
 
 PAY_METHODS = [
-    {"id": "card", "label": "신용/체크카드", "icon": "\U0001F4B3", "color": "#1A6CF5"},
-    {"id": "cash", "label": "현금결제", "icon": "\U0001F4B5", "color": "#10B981"},
-    {"id": "samsung", "label": "삼성페이", "icon": "⬛", "color": "#1428A0"},
     {"id": "kakao", "label": "카카오페이", "icon": "\U0001F7E1", "color": "#FEE500"},
     {"id": "naver", "label": "네이버페이", "icon": "\U0001F7E2", "color": "#03C75A"},
+    {"id": "samsung", "label": "삼성페이", "icon": "⬛", "color": "#1428A0"},
     {"id": "apple", "label": "Apple Pay", "icon": "\U0001F34E", "color": "#333"},
+    {"id": "payco", "label": "PAYCO", "icon": "\U0001F534", "color": "#E4312B"},
+    {"id": "card", "label": "신용/체크카드", "icon": "\U0001F4B3", "color": "#1A6CF5"},
+    # 'cash'는 매장 계산대 현금결제 이력을 위해 DB에는 남겨두지만(과거 주문 FK 참조),
+    # 키오스크 결제수단 목록에는 더 이상 노출하지 않는다 (App.js에서 필터링).
+    {"id": "cash", "label": "현금결제", "icon": "\U0001F4B5", "color": "#10B981"},
 ]
 
 
