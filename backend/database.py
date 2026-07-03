@@ -33,10 +33,18 @@ def _migrate_pay_methods(conn):
     conn.commit()
 
 
+def _migrate_cash_to_payco(conn):
+    """키오스크에서 '현금결제'를 더 이상 받지 않기로 하면서, 과거 현금결제 주문
+    기록도 PAYCO 결제로 일괄 전환한다(운영 요청). pay_method='cash'인 행이
+    이미 없으면 0건 갱신되는 멱등 연산이라 재시작마다 실행해도 안전하다."""
+    conn.execute("UPDATE orders SET pay_method='payco' WHERE pay_method='cash'")
+    conn.commit()
+
+
 def init_db():
     """DB 파일이 없으면 스키마를 만들고 초기 메뉴 데이터를 시드한다.
     이미 있는 DB(운영 환경 포함)라면 스키마는 그대로 두고, 코드 업데이트로
-    새로 추가된 결제수단만 채워 넣는다."""
+    새로 추가된 결제수단을 채워 넣고 과거 현금결제 주문을 PAYCO로 전환한다."""
     is_new = not DB_PATH.exists()
     conn = get_db()
     if is_new:
@@ -46,4 +54,5 @@ def init_db():
         seed(conn)
     else:
         _migrate_pay_methods(conn)
+        _migrate_cash_to_payco(conn)
     conn.close()
