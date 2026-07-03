@@ -353,7 +353,7 @@ function App() {
 
       {/* Master-detail */}
       <div className="admin-master-detail-grid">
-        <div>
+        <div className="admin-order-list-col">
           {loading ? (
             <DS.Card padding={40} radius={18} style={{ textAlign: 'center' }}>
               <DS.ActivityIndicator size={22} color="var(--labels-secondary)" />
@@ -374,7 +374,7 @@ function App() {
             </div>
           )}
         </div>
-        <div style={{ position: 'sticky', top: 24 }}>
+        <div className="admin-order-detail-col" style={{ position: 'sticky', top: 24 }}>
           <OrderDetail order={selected} payMethods={payMethods} extraLabelById={extraLabelById} onChangeStatus={handleChangeStatus} updating={updating} />
         </div>
       </div>

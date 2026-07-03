@@ -23,10 +23,12 @@
   ::-webkit-scrollbar { width: 8px; height: 8px; }
   ::-webkit-scrollbar-track { background: transparent; }
   ::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.18); border-radius: 4px; }
-  /* 주문 목록 + 상세 패널: 좁은 화면에서는 2열이 찌그러지므로 1열로 쌓는다. */
+  /* 주문 목록 + 상세 패널: 좁은 화면에서는 2열이 찌그러지므로 1열로 쌓는다.
+     이때는 상세 패널이 목록보다 위에 오도록 순서만 시각적으로 바꾼다. */
   .admin-master-detail-grid { display: grid; grid-template-columns: minmax(320px, 420px) 1fr; gap: 16px; align-items: flex-start; }
   @media (max-width: 780px) {
     .admin-master-detail-grid { grid-template-columns: 1fr; }
+    .admin-order-detail-col { order: -1; }
   }
 </style>
 </head>
